@@ -62,10 +62,7 @@ export default function PoemTree({ id, groupRef }) {
   const isHarvestable = isFullyRevealed
 
   let poemText = hasPoem ? tree.fullPoem : ''
-  // Chinese poems end with ciggie emoji
-  if (tree.lang === 'zh' && hasPoem && !poemText.endsWith('🚬')) {
-    poemText = poemText + '\n🚬'
-  }
+  const showCiggie = tree.lang === 'zh' && hasPoem
 
   const lines = poemText ? poemText.split('\n') : []
 
@@ -187,6 +184,19 @@ export default function PoemTree({ id, groupRef }) {
               </Text>
             )
           })}
+
+      {/* Chinese poems end with ciggie emoji */}
+      {showCiggie && isFullyRevealed && (
+        <Text
+          position={[0, -(revealedCount + 0.5) * (fontSize * LINE_HEIGHT), 0]}
+          fontSize={fontSize * 1.2}
+          anchorX='left'
+          anchorY='middle'
+          fillOpacity={tree.opacity}
+        >
+          🚬
+        </Text>
+      )}
 
       {/* Fetching indicator */}
       {tree.isFetchingPoem && revealedCount === 0 && (
