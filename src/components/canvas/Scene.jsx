@@ -3,14 +3,16 @@
 import { Canvas } from '@react-three/fiber'
 import { Preload } from '@react-three/drei'
 import { r3f } from '@/helpers/global'
-import * as THREE from 'three'
 
 export default function Scene({ ...props }) {
-  // Everything defined in here will persist between route changes, only children are swapped
   return (
-    <Canvas {...props}
-      onCreated={(state) => (state.gl.toneMapping = THREE.AgXToneMapping)}
+    <Canvas
+      {...props}
+      orthographic
+      camera={{ zoom: 1, position: [0, 0, 100], near: 0.1, far: 1000 }}
+      gl={{ antialias: true }}
     >
+      <color attach='background' args={['#000000']} />
       {/* @ts-ignore */}
       <r3f.Out />
       <Preload all />
