@@ -18,6 +18,17 @@ const nextConfig = {
   // },
   reactStrictMode: true, // Recommended for the `pages` directory, default in `app`.
   images: {},
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'ALLOWALL' },
+          { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+        ],
+      },
+    ]
+  },
   webpack(config, { isServer }) {
     if (!isServer) {
       // We're in the browser build, so we can safely exclude the sharp module
