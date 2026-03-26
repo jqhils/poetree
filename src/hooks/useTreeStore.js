@@ -13,15 +13,17 @@ export const PHYSICS = {
   damping: 0.994,
   maxVelocity: 5.2, // 30% faster
   waterRadius: 90,
-  spawnInterval: 3000, // faster spawn
+  spawnInterval: 1000, // 3x faster spawn
   bounceDist: 70, // bigger bump zone
   bounceStrength: 1.2, // stronger bounce
   wakeTurbulence: 0.39, // 30% faster
   gridDistortion: 800,
-  baseGrowthRate: 0.05, // 5% of tree's growthRate applied passively
+  baseGrowthRate: 18, // ~3 words/sec baseline (chars/sec)
   waterGrowthBoost: 0.15, // 15% proportional increase per water tick
   brownianStrength: 0.12, // slow random drift
   brownianInterval: 500, // ms between random nudges
+  repelRadius: 150, // distance at which poems start pushing each other apart
+  repelStrength: 16, // how hard they push (20% of original 80)
   orangeThreshold: 0.7, // fraction of poem revealed to turn orange
   waterDropSpawnInterval: 800, // ms between ambient water drops
   waterDropLifespan: 8000, // ms before water drop fades
@@ -52,15 +54,20 @@ export const useTreeStore = create((set, get) => ({
     const y = (Math.random() - 0.5) * halfH * 1.4
     const vx = (Math.random() - 0.5) * 2.0
     const vy = (Math.random() - 0.5) * 2.0
-    const lifespan = 15000 + Math.random() * 5000
+    const lifespan = 30000 + Math.random() * 10000
     const growthRate = 8 + Math.random() * 12
+
+    const { theme, lang, isRainbow, isEmoji } = getRandomTheme()
 
     const tree = {
       id,
       position: [x, y],
       velocity: [vx, vy],
       mass: PHYSICS.baseMass,
-      theme: getRandomTheme(),
+      theme,
+      lang,
+      isRainbow,
+      isEmoji,
       fullPoem: null,
       revealedChars: 0,
       growthRate,

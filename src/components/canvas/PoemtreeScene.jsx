@@ -16,13 +16,34 @@ async function fetchPoem(treeId) {
   const tree = useTreeStore.getState().trees.get(treeId)
   if (!tree || tree.isFetchingPoem || tree.fullPoem) return
 
+  // Emoji poems — generate client-side, no API call
+  if (tree.isEmoji) {
+    const emojiPool = '🌸🔥💀🍕🧦🍌🧠💤🌙⭐🎸🐛🎪🍩🦷🫧🪴🎈🧊🫠🌈🍄🐸🪩🎭🫥🦴🧃🪬🫁'
+    const emojis = [...emojiPool]
+    const lineCount = 8 + Math.floor(Math.random() * 8)
+    const emojiLines = []
+    for (let i = 0; i < lineCount; i++) {
+      const wordCount = 1 + Math.floor(Math.random() * 6)
+      let line = ''
+      for (let w = 0; w < wordCount; w++) {
+        line += emojis[Math.floor(Math.random() * emojis.length)]
+      }
+      emojiLines.push(line)
+    }
+    useTreeStore.getState().updateTree(treeId, {
+      fullPoem: emojiLines.join('\n'),
+      isFetchingPoem: false,
+    })
+    return
+  }
+
   useTreeStore.getState().updateTree(treeId, { isFetchingPoem: true })
 
   try {
     const res = await fetch('/api/poem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: tree.theme }),
+      body: JSON.stringify({ theme: tree.theme, lang: tree.lang }),
     })
     const { poem } = await res.json()
 
@@ -143,9 +164,26 @@ export default function PoemtreeScene() {
         b.velocity[0] -= (fx / b.mass) * delta
         b.velocity[1] -= (fy / b.mass) * delta
 
-        const result = applyBounce(a.position, b.position, a.velocity, b.velocity)
-        a.velocity = result.vel1
-        b.velocity = result.vel2
+        // Repel force — smooth push when poems get too close
+        const rdx = b.position[0] - a.position[0]
+        const rdy = b.position[1] - a.position[1]
+        const rDist = Math.sqrt(rdx * rdx + rdy * rdy)
+        if (rDist < PHYSICS.repelRadius && rDist > 0) {
+          const repelForce = PHYSICS.repelStrength * (1 - rDist / PHYSICS.repelRadius)
+          const rnx = rdx / rDist
+          const rny = rdy / rDist
+          a.velocity[0] -= rnx * repelForce * delta
+          a.velocity[1] -= rny * repelForce * delta
+          b.velocity[0] += rnx * repelForce * delta
+          b.velocity[1] += rny * repelForce * delta
+
+          // Rotation torque from close encounters — cross product of relative position and velocity
+          const dvx = b.velocity[0] - a.velocity[0]
+          const dvy = b.velocity[1] - a.velocity[1]
+          const torque = (rnx * dvy - rny * dvx) * 0.0001 * (1 - rDist / PHYSICS.repelRadius)
+          a.rotation += torque
+          b.rotation -= torque
+        }
       }
     }
 
@@ -208,8 +246,8 @@ export default function PoemtreeScene() {
       const cursorDist = Math.sqrt(dx * dx + dy * dy)
       tree.isWatering = cursorDist < PHYSICS.waterRadius
 
-      // Fetch poem on first water contact
-      if (tree.isWatering && !tree.fullPoem && !tree.isFetchingPoem) {
+      // Fetch poem eagerly (no longer requires watering)
+      if (!tree.fullPoem && !tree.isFetchingPoem) {
         fetchPoem(tree.id)
       }
 
@@ -217,10 +255,10 @@ export default function PoemtreeScene() {
         const totalChars = tree.fullPoem.length
 
         if (tree.revealedChars < totalChars) {
-          // Base passive growth (5% of growth rate)
-          const baseGrowth = tree.growthRate * PHYSICS.baseGrowthRate * delta
+          // Fixed baseline growth: ~3 words/sec (18 chars/sec)
+          const baseGrowth = PHYSICS.baseGrowthRate * delta
 
-          // Active watering growth (proportional: 15% boost compounding)
+          // Active watering adds proportional boost on top
           let waterGrowth = 0
           if (tree.isWatering) {
             const currentRate = tree.growthRate * (1 + PHYSICS.waterGrowthBoost * (tree.revealedChars / totalChars))
@@ -259,6 +297,7 @@ export default function PoemtreeScene() {
       store.updateTree(tree.id, {
         position: [...tree.position],
         velocity: [...tree.velocity],
+        rotation: tree.rotation,
         isWatering: tree.isWatering,
         revealedChars: tree.revealedChars,
         mass: tree.mass,

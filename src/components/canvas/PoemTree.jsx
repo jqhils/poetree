@@ -5,9 +5,26 @@ import { useFrame } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
 import { useTreeStore, PHYSICS } from '@/hooks/useTreeStore'
 
-const FONT_URL = '/fonts/SpaceMono.ttf'
-const BASE_FONT_SIZE = 18
-const LINE_HEIGHT = 2.0
+const FONT_EN = '/fonts/SpaceMono.ttf'
+const FONT_ZH = '/fonts/NotoSansSC.otf'
+const FONT_AR = '/fonts/NotoSansArabic.ttf'
+const BASE_FONT_SIZE = 12
+const LINE_HEIGHT = 1.8
+const CHAR_WIDTH_RATIO = 0.6
+
+// Geometric indent patterns — cycles through as poem grows
+const PATTERNS = [
+  (i, count) => Math.abs(i - count / 2) / (count / 2), // diamond
+  (i, count) => i / count, // staircase right
+  (i, count) => 1 - i / count, // staircase left
+  (i, count) => Math.sin((i / count) * Math.PI), // wave bulge
+  (i, count) => (i % 2) * 0.5, // zigzag
+]
+
+const RAINBOW_COLORS = [
+  '#ff4444', '#ff8800', '#ffdd00', '#44dd44',
+  '#4488ff', '#8844ff', '#ff44cc',
+]
 
 export default function PoemTree({ id, groupRef }) {
   const tree = useTreeStore((s) => s.trees.get(id))
@@ -15,6 +32,8 @@ export default function PoemTree({ id, groupRef }) {
   const localRef = useRef()
   const [harvestAnim, setHarvestAnim] = useState(false)
   const harvestScale = useRef(1)
+  // Stable pattern index per tree
+  const patternIdx = useRef(Math.floor(Math.random() * PATTERNS.length))
 
   useEffect(() => {
     if (groupRef) groupRef.current = localRef.current
@@ -23,12 +42,9 @@ export default function PoemTree({ id, groupRef }) {
   useFrame((_, delta) => {
     if (!localRef.current || !tree) return
 
-    // Gentle rotation — clamp to ±0.15 rad so text stays readable
-    const maxAngle = 0.15
+    // Free rotation
     localRef.current.rotation.z += tree.rotation
-    localRef.current.rotation.z = Math.max(-maxAngle, Math.min(maxAngle, localRef.current.rotation.z))
 
-    // Harvest collapse animation
     if (harvestAnim) {
       harvestScale.current -= delta * 3
       if (harvestScale.current <= 0) {
@@ -37,64 +53,53 @@ export default function PoemTree({ id, groupRef }) {
       }
       localRef.current.scale.setScalar(harvestScale.current)
     }
-
-    // Watering pulse
-    if (tree.isWatering && !harvestAnim) {
-      const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.03
-      localRef.current.scale.setScalar(pulse)
-    } else if (!harvestAnim) {
-      localRef.current.scale.setScalar(1)
-    }
   })
 
   if (!tree) return null
 
-  // Determine what text to show
   const hasPoem = !!tree.fullPoem
   const isFullyRevealed = hasPoem && tree.revealedChars >= tree.fullPoem.length
   const isHarvestable = isFullyRevealed
 
-  // Split poem into lines for vertical stacking
-  const lines = hasPoem ? tree.fullPoem.split('\n') : []
+  let poemText = hasPoem ? tree.fullPoem : ''
+  // Chinese poems end with ciggie emoji
+  if (tree.lang === 'zh' && hasPoem && !poemText.endsWith('🚬')) {
+    poemText = poemText + '\n🚬'
+  }
 
-  // Calculate how many chars are revealed per line
+  const lines = poemText ? poemText.split('\n') : []
+
+  // Calculate revealed chars per line
   let charsRemaining = Math.floor(tree.revealedChars)
-  const fadeChars = 4
   const revealedPerLine = []
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]
     if (charsRemaining >= line.length) {
-      revealedPerLine.push({ solid: line, fading: '' })
+      revealedPerLine.push(line)
       charsRemaining -= line.length
       if (li < lines.length - 1) charsRemaining -= 1
     } else if (charsRemaining > 0) {
-      const solidEnd = Math.max(0, charsRemaining - fadeChars)
-      revealedPerLine.push({
-        solid: line.substring(0, solidEnd),
-        fading: line.substring(solidEnd, charsRemaining),
-      })
+      revealedPerLine.push(line.substring(0, charsRemaining))
       charsRemaining = 0
     } else {
-      revealedPerLine.push({ solid: '', fading: '' })
+      revealedPerLine.push('')
     }
   }
 
-  // Color: shifts based on progress, turns orange past threshold
   const progress = hasPoem ? tree.revealedChars / tree.fullPoem.length : 0
-  let color
-  if (isHarvestable) {
-    color = '#ffdd88'
-  } else if (progress >= PHYSICS.orangeThreshold) {
-    // Lerp from green to orange as it passes the threshold
-    const orangeProgress = (progress - PHYSICS.orangeThreshold) / (1 - PHYSICS.orangeThreshold)
-    color = lerpColor('#aaccaa', '#ee8833', orangeProgress)
-  } else {
-    color = lerpColor('#556677', '#aaccaa', progress / PHYSICS.orangeThreshold)
-  }
 
-  // Font size grows slightly with progress
-  const fontSize = BASE_FONT_SIZE + progress * 6
+  // Solid color: white, or orange past threshold. Rainbow overrides.
+  const baseColor = progress >= PHYSICS.orangeThreshold ? '#ee8833' : '#ffffff'
+
+  const fontSize = BASE_FONT_SIZE + progress * 4
+  const fontUrl = tree.lang === 'zh' ? FONT_ZH : tree.lang === 'ar' ? FONT_AR : FONT_EN
+  const isRTL = tree.lang === 'ar'
+
+  // Geometric indent pattern
+  const pattern = PATTERNS[patternIdx.current]
+  const revealedCount = revealedPerLine.filter((t) => t.length > 0).length
+  const maxIndent = 60
 
   const handleClick = (e) => {
     e.stopPropagation()
@@ -103,86 +108,108 @@ export default function PoemTree({ id, groupRef }) {
     }
   }
 
+  const poemCenterY = revealedCount > 0 ? -(revealedCount * fontSize * LINE_HEIGHT) / 2 : 0
+
+  // For rainbow: assign a color per word using time-based offset
+  const now = Date.now()
+
   return (
     <group
       ref={localRef}
       position={[tree.position[0], tree.position[1], 0]}
       onClick={handleClick}
     >
-      {/* Theme label — above poem, fades as poem grows */}
-      <Text
-        position={[0, fontSize * 0.8, 0]}
-        fontSize={10}
-        color='#667788'
-        anchorX='left'
-        anchorY='middle'
-        font={FONT_URL}
-        fillOpacity={tree.opacity * Math.max(0.15, 1 - progress * 1.5)}
-        maxWidth={300}
-        textAlign='left'
-      >
-        {tree.theme}
-      </Text>
+      {/* Dot */}
+      <mesh position={[-12, poemCenterY, 0]}>
+        <circleGeometry args={[2.5, 16]} />
+        <meshBasicMaterial
+          color={tree.isRainbow ? RAINBOW_COLORS[Math.floor(now / 100) % RAINBOW_COLORS.length] : baseColor}
+          transparent
+          opacity={tree.opacity}
+        />
+      </mesh>
 
-      {/* Poem lines — top-to-bottom, left-aligned */}
-      {revealedPerLine.map((parts, i) => {
-        const revealed = parts.solid + parts.fading
-        if (!revealed) return null
-        const y = -(i + 0.5) * (fontSize * LINE_HEIGHT)
-        const x = 0
+      {/* Poem lines */}
+      {tree.isRainbow
+        ? // Rainbow mode: render each word separately with its own color
+          revealedPerLine.map((text, i) => {
+            if (!text) return null
+            const y = -(i + 0.5) * (fontSize * LINE_HEIGHT)
+            const indent = pattern(i, Math.max(revealedCount, 1)) * maxIndent
+            const words = text.split(' ')
+            let xOffset = indent
+            return (
+              <group key={i} position={[0, y, 0]}>
+                {words.map((word, wi) => {
+                  const colorIdx = (i * 7 + wi + Math.floor(now / 150)) % RAINBOW_COLORS.length
+                  const wordX = xOffset
+                  // Estimate word width
+                  xOffset += (word.length + 1) * CHAR_WIDTH_RATIO * fontSize
+                  return (
+                    <Text
+                      key={wi}
+                      position={[wordX, 0, 0]}
+                      fontSize={fontSize}
+                      color={RAINBOW_COLORS[colorIdx]}
+                      anchorX='left'
+                      anchorY='middle'
+                      font={fontUrl}
+                      fillOpacity={tree.opacity}
+                    >
+                      {word}
+                    </Text>
+                  )
+                })}
+              </group>
+            )
+          })
+        : // Normal mode
+          revealedPerLine.map((text, i) => {
+            if (!text) return null
+            const y = -(i + 0.5) * (fontSize * LINE_HEIGHT)
+            const indent = pattern(i, Math.max(revealedCount, 1)) * maxIndent
 
-        // Fade: chars near the reveal edge are slightly transparent
-        const hasFading = parts.fading.length > 0
-        const fadeOpacity = hasFading
-          ? tree.opacity * (0.6 + 0.4 * (parts.solid.length / Math.max(revealed.length, 1)))
-          : tree.opacity
-
-        return (
-          <Text
-            key={i}
-            position={[x, y, 0]}
-            fontSize={fontSize}
-            color={color}
-            anchorX='left'
-            anchorY='middle'
-            font={FONT_URL}
-            fillOpacity={fadeOpacity}
-            maxWidth={300}
-            textAlign='left'
-          >
-            {revealed}
-          </Text>
-        )
-      })}
+            return (
+              <Text
+                key={i}
+                position={[indent, y, 0]}
+                fontSize={fontSize}
+                color={baseColor}
+                anchorX={isRTL ? 'right' : 'left'}
+                anchorY='middle'
+                font={fontUrl}
+                fillOpacity={tree.opacity}
+                maxWidth={400}
+                textAlign={isRTL ? 'right' : 'left'}
+                direction={isRTL ? 'rtl' : 'ltr'}
+              >
+                {text}
+              </Text>
+            )
+          })}
 
       {/* Fetching indicator */}
-      {tree.isFetchingPoem && (
-        <Text
-          position={[0, -(fontSize * LINE_HEIGHT * 0.5), 0]}
-          fontSize={10}
-          color='#88ccaa'
-          anchorX='left'
-          fillOpacity={0.5 + Math.sin(Date.now() * 0.005) * 0.3}
-          font={FONT_URL}
-        >
-          ...
-        </Text>
+      {tree.isFetchingPoem && revealedCount === 0 && (
+        <mesh position={[-12, 0, 0]}>
+          <ringGeometry args={[4, 6, 16]} />
+          <meshBasicMaterial color='#88ccaa' transparent opacity={0.4} />
+        </mesh>
       )}
 
       {/* Harvestable glow ring */}
       {isHarvestable && (
-        <mesh position={[60, -(lines.length * fontSize * LINE_HEIGHT) / 2, -0.1]}>
-          <ringGeometry args={[fontSize * 5, fontSize * 5 + 2, 32]} />
-          <meshBasicMaterial color='#ffdd88' transparent opacity={0.2 + Math.sin(Date.now() * 0.003) * 0.1} />
+        <mesh position={[60, poemCenterY, -0.1]}>
+          <ringGeometry args={[fontSize * 6, fontSize * 6 + 2, 32]} />
+          <meshBasicMaterial color='#ee8833' transparent opacity={0.2} />
         </mesh>
       )}
 
       {/* Life indicator ring */}
       {!isHarvestable && (
-        <mesh position={[0, fontSize * 1.8, -0.1]}>
+        <mesh position={[-12, poemCenterY + 14, -0.1]}>
           <ringGeometry
             args={[
-              8, 10, 32, 1, 0,
+              6, 8, 32, 1, 0,
               Math.PI * 2 * Math.max(0, 1 - (Date.now() - tree.spawnTime) / tree.lifespan),
             ]}
           />
@@ -191,17 +218,4 @@ export default function PoemTree({ id, groupRef }) {
       )}
     </group>
   )
-}
-
-// Simple hex color lerp
-function lerpColor(a, b, t) {
-  t = Math.max(0, Math.min(1, t))
-  const ah = parseInt(a.replace('#', ''), 16)
-  const bh = parseInt(b.replace('#', ''), 16)
-  const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff
-  const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff
-  const rr = Math.round(ar + (br - ar) * t)
-  const rg = Math.round(ag + (bg - ag) * t)
-  const rb = Math.round(ab + (bb - ab) * t)
-  return `#${((rr << 16) | (rg << 8) | rb).toString(16).padStart(6, '0')}`
 }
